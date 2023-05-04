@@ -118,8 +118,9 @@ where
         layout: Layout<'_>,
         renderer: &Renderer,
     ) -> Option<overlay::Element<'b, Message, Renderer>> {
+        // Set position to center of bottom edge
         let bounds = layout.bounds();
-        let position = Point::new(bounds.x, bounds.y);
+        let position = Point::new(bounds.x + bounds.width / 2.0, bounds.y + bounds.height);
 
         // XXX needed to use RefCell to get &mut for popup element
         Some(overlay::Element::new(
@@ -153,10 +154,17 @@ impl<'a, 'b, Message, Renderer> overlay::Overlay<Message, Renderer>
 where
     Renderer: iced_native::Renderer,
 {
-    fn layout(&self, renderer: &Renderer, bounds: Size, position: Point) -> layout::Node {
-        // TODO handle position
-        let limits = layout::Limits::new(bounds, bounds);
-        self.content.borrow().as_widget().layout(renderer, &limits)
+    fn layout(&self, renderer: &Renderer, bounds: Size, mut position: Point) -> layout::Node {
+        // Position is set to the center bottom of the lower widget
+
+        let limits = layout::Limits::new(Size::UNIT, bounds);
+        let mut node = self.content.borrow().as_widget().layout(renderer, &limits);
+
+        let width = node.size().width;
+        position.x = (position.x - width / 2.0).clamp(0.0, bounds.width - width);
+        node.move_to(position);
+
+        node
     }
 
     fn operate(&mut self, layout: Layout<'_>, operation: &mut dyn Operation<Message>) {
