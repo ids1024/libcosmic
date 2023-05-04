@@ -13,13 +13,13 @@ use iced_native::widget::{Operation, Tree};
 use iced_native::{
     Clipboard, Element, Layout, Length, Padding, Point, Rectangle, Shell, Size, Widget,
 };
-use std::{fmt::Debug, hash::Hash};
+use std::{cell::RefCell, fmt::Debug, hash::Hash};
 
 pub use iced_style::container::{Appearance, StyleSheet};
 
 pub struct Popover<'a, Message, Renderer> {
-    content: Element<'a, Message, Renderer>,
-    popup: Element<'a, Message, Renderer>,
+    pub content: Element<'a, Message, Renderer>,
+    pub popup: RefCell<Element<'a, Message, Renderer>>,
 }
 
 impl<'a, Message, Renderer> Widget<Message, Renderer> for Popover<'a, Message, Renderer>
@@ -28,11 +28,11 @@ where
     Renderer::Theme: StyleSheet,
 {
     fn children(&self) -> Vec<Tree> {
-        vec![Tree::new(&self.content), Tree::new(&self.popup)]
+        vec![Tree::new(&self.content), Tree::new(&*self.popup.borrow())]
     }
 
     fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(&[&self.content, &self.popup])
+        tree.diff_children(&[&self.content, &self.popup.borrow()])
     }
 
     fn width(&self) -> Length {
@@ -121,33 +121,47 @@ where
         let bounds = layout.bounds();
         let position = Point::new(bounds.x, bounds.y);
 
+        // XXX needed to use RefCell to get &mut for popup element
         Some(overlay::Element::new(
             position,
             Box::new(Overlay {
                 tree: &mut tree.children[1],
-                content: &mut self.popup,
+                content: &self.popup,
             }),
         ))
     }
 }
 
-struct Overlay<'a, Message, Renderer> {
-    tree: &'a mut Tree,
-    content: &'a mut Element<'a, Message, Renderer>,
+impl<'a, Message, Renderer> From<Popover<'a, Message, Renderer>> for Element<'a, Message, Renderer> 
+where
+    Message: 'static,
+    Renderer: iced_native::Renderer + 'static,
+    Renderer::Theme: StyleSheet,
+{
+    fn from(popover: Popover<'a, Message, Renderer>) -> Self {
+        Self::new(popover)
+    }
 }
 
-impl<'a, Message, Renderer> overlay::Overlay<Message, Renderer> for Overlay<'a, Message, Renderer>
+struct Overlay<'a, 'b, Message, Renderer> {
+    tree: &'a mut Tree,
+    content: &'a RefCell<Element<'b, Message, Renderer>>,
+}
+
+impl<'a, 'b, Message, Renderer> overlay::Overlay<Message, Renderer>
+    for Overlay<'a, 'b, Message, Renderer>
 where
     Renderer: iced_native::Renderer,
 {
     fn layout(&self, renderer: &Renderer, bounds: Size, position: Point) -> layout::Node {
         // TODO handle position
         let limits = layout::Limits::new(bounds, bounds);
-        self.content.as_widget().layout(renderer, &limits)
+        self.content.borrow().as_widget().layout(renderer, &limits)
     }
 
     fn operate(&mut self, layout: Layout<'_>, operation: &mut dyn Operation<Message>) {
         self.content
+            .borrow()
             .as_widget()
             .operate(self.tree, layout, operation)
     }
@@ -161,7 +175,7 @@ where
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
     ) -> event::Status {
-        self.content.as_widget_mut().on_event(
+        self.content.borrow_mut().as_widget_mut().on_event(
             self.tree,
             event,
             layout,
@@ -179,7 +193,7 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
+        self.content.borrow().as_widget().mouse_interaction(
             self.tree,
             layout,
             cursor_position,
@@ -197,7 +211,7 @@ where
         cursor_position: Point,
     ) {
         let bounds = layout.bounds();
-        self.content.as_widget().draw(
+        self.content.borrow().as_widget().draw(
             self.tree,
             renderer,
             theme,
